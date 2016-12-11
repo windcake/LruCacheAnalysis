@@ -22,15 +22,19 @@ import com.steven.lrucacheanalysis.helper.SDCardHelper;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity
+{
     private static final String TAG = "MainActivity";
     private Context mContxt = this;
     private ImageView imageView_main_show;
@@ -43,9 +47,11 @@ public class MainActivity extends AppCompatActivity {
     DiskLruCache mDiskLruCache = null;
     String imageUrl = "http://img.my.csdn.net/uploads/201309/01/1378037235_7476.jpg";
     DiskLruCache.Editor editor;
+    private String diskKey;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(Bundle savedInstanceState)
+    {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
@@ -54,32 +60,44 @@ public class MainActivity extends AppCompatActivity {
         initLruCache();
     }
 
-    private void initLruCache() {
-        long maxMemory = Runtime.getRuntime().maxMemory();
-        long freeMemory = Runtime.getRuntime().freeMemory();
-        long totalMemory = Runtime.getRuntime().totalMemory();
+    private void initLruCache()
+    {
+        long maxMemory = Runtime.getRuntime()
+                                .maxMemory();
+        long freeMemory = Runtime.getRuntime()
+                                 .freeMemory();
+        long totalMemory = Runtime.getRuntime()
+                                  .totalMemory();
         setTitle(maxMemory + ":" + freeMemory + ":" + totalMemory);
         lruCache = new MyLruCache((int) (maxMemory / 8));
-        String key = hashKeyForDisk(imageUrl);
+        diskKey = hashKeyForDisk(imageUrl);
 
 
-        try {
+        try
+        {
             File cacheDir = getDiskCacheDir(mContxt, "bitmap");
 
-            Toast.makeText(mContxt, cacheDir.toString(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(mContxt, cacheDir.toString(), Toast.LENGTH_SHORT)
+                 .show();
 
-            if (!cacheDir.exists()) {
+            if (!cacheDir.exists())
+            {
                 cacheDir.mkdirs();
             }
-            mDiskLruCache = DiskLruCache.open(cacheDir, getAppVersion(mContxt), 1, 10 * 1024 * 1024);
-            editor = mDiskLruCache.edit(key);
+            mDiskLruCache = DiskLruCache.open(cacheDir,
+                                              getAppVersion(mContxt),
+                                              1,
+                                              10 * 1024 * 1024);
+            editor = mDiskLruCache.edit(diskKey);
 
-        } catch (IOException e) {
+        } catch (IOException e)
+        {
             e.printStackTrace();
         }
     }
 
-    private void initView() {
+    private void initView()
+    {
         imageView_main_show = (ImageView) findViewById(R.id.imageView_main_show);
         imageView_main_thumbnail = (ImageView) findViewById(R.id.imageView_main_thumbnail);
 
@@ -87,147 +105,162 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "-->>" + fileName);
     }
 
-    public void clickView(View view) {
-        switch (view.getId()) {
+    public void clickView(View view)
+    {
+        switch (view.getId())
+        {
             case R.id.button_main_load:
-//                Bitmap bm = null;
-//                //从缓存中找图片
-//                bm = getBitmapFromCache(URL_STRING);
-////              如果缓存中有就设置，如果没有就去网上加载。
-//                if (bm != null) {
-//                    imageView_main_show.setImageBitmap(bm);
-//                } else {
-                //从网络下载图片
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
+                Bitmap bm = null;
+                //从缓存中找图片
+                bm = getBitmapFromCache(diskKey);
+//              如果缓存中有就设置，如果没有就去网上加载。
+                if (bm != null)
+                {
+                    imageView_main_show.setImageBitmap(bm);
+                } else
+                {
+//                从网络下载图片
+                    new Thread(new Runnable()
+                    {
+                        @Override
+                        public void run()
+                        {
 //                           从网络上拿到输入流，然后写到输出流，然后commit
-                        try {
-                            InputStream is = getInputStreamFromUrl(imageUrl);
-                            OutputStream os = editor.newOutputStream(0);
-                            BufferedInputStream in = new BufferedInputStream(is, 8 * 1024);
-                            ;
-                            BufferedOutputStream out = new BufferedOutputStream(os, 8 * 1024);
-                            int b;
-                            while ((b = in.read()) != -1) {
-                                out.write(b);
+                            try
+                            {
+                                HttpURLConnection conn = null;
+                                URL url = new URL(imageUrl);
+                                conn = (HttpURLConnection) url.openConnection();
+                                conn.setRequestMethod("GET");
+                                conn.setDoInput(true);
+                                conn.setConnectTimeout(5000);
+                                conn.connect();
+
+                                if (conn.getResponseCode() == 200)
+                                {
+                                    DiskLruCache.Snapshot snapShot = null;
+                                    FileInputStream fileInputStream = null;
+                                    FileDescriptor fileDescriptor = null;
+                                    InputStream is = conn.getInputStream();
+                                    OutputStream os = editor.newOutputStream(0);
+
+                                    BufferedInputStream in = new BufferedInputStream(is, 8 * 1024);
+                                    BufferedOutputStream out = new BufferedOutputStream(os,
+                                                                                        8 * 1024);
+
+                                    int b;
+                                    while ((b = in.read()) != -1)
+                                    {
+                                        out.write(b);
+                                    }
+//                          数据被写入缓存
+                                    editor.commit();
+
+                                    snapShot = mDiskLruCache.get(diskKey);
+
+                                    if (snapShot != null)
+                                    {
+                                        fileInputStream = (FileInputStream) snapShot.getInputStream(0);
+                                        fileDescriptor = fileInputStream.getFD();
+                                        final Bitmap bitmap = BitmapFactory.decodeFileDescriptor(fileDescriptor);
+                                        Log.i("aaaa","网络");
+
+                                        handler.post(new Runnable()
+                                        {
+                                            @Override
+                                            public void run()
+                                            {
+                                                Log.i("aaaa", "进入Handler");
+                                                imageView_main_show.setImageBitmap(bitmap);
+                                            }
+                                        });
+//                                      放到内存缓存里
+                                        if (bitmap != null)
+                                        {
+                                            lruCache.put(diskKey, bitmap);
+                                        }
+                                    }
+                                }
+
+                            } catch (MalformedURLException e)
+                            {
+                                e.printStackTrace();
+                            } catch (IOException e)
+                            {
+                                e.printStackTrace();
                             }
-                            editor.commit();
-                        } catch (IOException e) {
-                            e.printStackTrace();
+
+
                         }
-                    }
-                }).start();
-//                }
+                    }).start();
+                }
                 break;
         }
     }
 
-    private InputStream getInputStreamFromUrl(String imageUrl) {
-        HttpURLConnection urlConnection = null;
-        BufferedOutputStream out = null;
-        BufferedInputStream in = null;
-        try {
-            final URL url = new URL(imageUrl);
-            urlConnection = (HttpURLConnection) url.openConnection();
-            in = new BufferedInputStream(urlConnection.getInputStream(), 8 * 1024);
+    private Bitmap getBitmapFromCache(String key)
+    {
+        Bitmap bm = null;
+        DiskLruCache.Snapshot snapShot = null;
+        FileInputStream fileInputStream = null;
+        FileDescriptor fileDescriptor = null;
+        //从强引用中找图片
+        bm = lruCache.get(key);
+        if (bm != null)
+        {
+            Log.i("aaaa","内存");
+            return bm;
+        } else
+        {
 
-            return in;
+            try
+            {
+                snapShot = mDiskLruCache.get(key);
+                if (snapShot != null)
+                {
+                    fileInputStream = (FileInputStream) snapShot.getInputStream(0);
+                    fileDescriptor = fileInputStream.getFD();
+                    bm = BitmapFactory.decodeFileDescriptor(fileDescriptor);
+                    Log.i("aaaa","磁盘");
 
-        } catch (final IOException e) {
-            e.printStackTrace();
-        } finally {
-            if (urlConnection != null) {
-                urlConnection.disconnect();
-            }
-            try {
-                if (out != null) {
-                    out.close();
+//               放到内存缓存里
+                    if (bm != null)
+                    {
+                        lruCache.put(diskKey, bm);
+                    }
+                    return bm;
                 }
-                if (in != null) {
-                    in.close();
-                }
-            } catch (final IOException e) {
+            } catch (IOException e)
+            {
                 e.printStackTrace();
             }
         }
         return null;
     }
 
-
-    private Bitmap getBitmapFromCache(String key) {
-        Bitmap bm = null;
-        //从强引用中找图片
-        bm = lruCache.get(key);
-        if (bm != null) {
-            return bm;
-        } else {
-            //从磁盘缓存中找图片
-            String filePath = SDCardHelper.getSDCardPrivateCacheDir(mContxt) + File.separator +
-                    fileName;
-            byte[] data = SDCardHelper.loadFileFromSDCard(filePath);
-            if (data != null) {
-                bm = BitmapFactory.decodeByteArray(data, 0, data.length);
-                //将bitmap放到强引用缓存中
-                lruCache.put(key, bm);
-                return bm;
-            }
-        }
-        return null;
-    }
-
-    private Bitmap createThumbnail(byte[] data, int newWidth, int newHeight) {
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        //是否只采集图像的边界信息
-        options.inJustDecodeBounds = true;
-        //第一次采样:只采集边界信息，不采集像素信息
-        BitmapFactory.decodeByteArray(data, 0, data.length, options);
-
-        int width = options.outWidth;
-        int height = options.outHeight;
-
-        int widthRatio = 0;
-        int heightRatio = 0;
-        int sampleSize = 0;
-
-        //通过第一次采样，获取到原图的边界信息，从而计算出缩放比例
-        if (newWidth != 0 && newHeight == 0) {
-            widthRatio = (int) (width / (float) newWidth);
-            sampleSize = widthRatio;
-        } else if (newWidth == 0 && newHeight != 0) {
-            heightRatio = (int) (height / (float) newHeight);
-            sampleSize = heightRatio;
-        } else {
-            widthRatio = (int) (width / (float) newWidth);
-            heightRatio = (int) (height / (float) newHeight);
-            sampleSize = widthRatio > heightRatio ? widthRatio : heightRatio;
-        }
-
-        //第二次采样
-        options.inSampleSize = sampleSize;
-        options.inPreferredConfig = Bitmap.Config.RGB_565;
-        options.inJustDecodeBounds = false;
-
-        return BitmapFactory.decodeByteArray(data, 0, data.length, options);
-    }
-
-    public String hashKeyForDisk(String key) {
+    public String hashKeyForDisk(String key)
+    {
         String cacheKey;
-        try {
+        try
+        {
             final MessageDigest mDigest = MessageDigest.getInstance("MD5");
             mDigest.update(key.getBytes());
             cacheKey = bytesToHexString(mDigest.digest());
-        } catch (NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException e)
+        {
             cacheKey = String.valueOf(key.hashCode());
         }
         return cacheKey;
     }
 
-    private String bytesToHexString(byte[] bytes) {
+    private String bytesToHexString(byte[] bytes)
+    {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < bytes.length; i++) {
+        for (int i = 0; i < bytes.length; i++)
+        {
             String hex = Integer.toHexString(0xFF & bytes[i]);
-            if (hex.length() == 1) {
+            if (hex.length() == 1)
+            {
                 sb.append('0');
             }
             sb.append(hex);
@@ -235,60 +268,34 @@ public class MainActivity extends AppCompatActivity {
         return sb.toString();
     }
 
-    public int getAppVersion(Context context) {
-        try {
-            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+    public int getAppVersion(Context context)
+    {
+        try
+        {
+            PackageInfo info = context.getPackageManager()
+                                      .getPackageInfo(context.getPackageName(), 0);
             return info.versionCode;
-        } catch (PackageManager.NameNotFoundException e) {
+        } catch (PackageManager.NameNotFoundException e)
+        {
             e.printStackTrace();
         }
         return 1;
     }
 
-    public File getDiskCacheDir(Context context, String uniqueName) {
+    public File getDiskCacheDir(Context context, String uniqueName)
+    {
         String cachePath;
         if (Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())
-                || !Environment.isExternalStorageRemovable()) {
-            cachePath = context.getExternalCacheDir().getPath();
-        } else {
-            cachePath = context.getCacheDir().getPath();
+                || !Environment.isExternalStorageRemovable())
+        {
+            cachePath = context.getExternalCacheDir()
+                               .getPath();
+        } else
+        {
+            cachePath = context.getCacheDir()
+                               .getPath();
         }
         return new File(cachePath + File.separator + uniqueName);
     }
-
-    private boolean downloadUrlToStream(String urlString, OutputStream outputStream) {
-        HttpURLConnection urlConnection = null;
-        BufferedOutputStream out = null;
-        BufferedInputStream in = null;
-        try {
-            final URL url = new URL(urlString);
-            urlConnection = (HttpURLConnection) url.openConnection();
-            in = new BufferedInputStream(urlConnection.getInputStream(), 8 * 1024);
-            out = new BufferedOutputStream(outputStream, 8 * 1024);
-            int b;
-            while ((b = in.read()) != -1) {
-                out.write(b);
-            }
-            return true;
-        } catch (final IOException e) {
-            e.printStackTrace();
-        } finally {
-            if (urlConnection != null) {
-                urlConnection.disconnect();
-            }
-            try {
-                if (out != null) {
-                    out.close();
-                }
-                if (in != null) {
-                    in.close();
-                }
-            } catch (final IOException e) {
-                e.printStackTrace();
-            }
-        }
-        return false;
-    }
-
 
 }
